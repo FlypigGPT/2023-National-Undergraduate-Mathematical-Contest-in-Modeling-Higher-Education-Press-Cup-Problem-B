@@ -1,59 +1,34 @@
-import numpy as np
 import pandas as pd
+import numpy as np
 
-# 问题2 多波束测深覆盖宽度建模思路
-# --------------------------------------------------
-# 已知：
-#   多波束开角120°，坡度1.5°，中心点水深120m
-#   测线方向与坡面法向夹角β
-#   船距中心点距离x（单位：海里，1海里=1852米）
-# 求：不同β、不同x下的覆盖宽度
-#
-# 主要变量：
-#   α = 坡度（1.5°），θ = 60°，D0 = 120m
-#   β = 测线与坡面法向夹角
-#   x = 距中心点距离
-#
-# 1. 水深计算（x方向分量）：
-#    D(x) = D0 + x * 1852 * tan(α) * cos(β)
-# 2. 覆盖宽度：
-#    W(x, β) = 2 * D(x) * tan(θ)
+# 初始化参数
+D_0 = 70                         # 中心点水深（米）
+theta = 120                      # 多波束开角（度）
+alpha = 1.5                      # 坡度（度）
+d = 200                          # 测线间距（米）
 
-# 参数
-beam_angle_deg = 120
-slope_deg = 1.5
-D0 = 120
-theta = np.radians(beam_angle_deg / 2)
-alpha = np.radians(slope_deg)
+# 修正条带间距（考虑坡度与投影角度）
+d_proj = d * np.sin(np.radians(90 + theta / 2)) / np.sin(np.radians(90 + alpha - theta / 2))
 
-# x为海里，转为米
-x_nm = np.array([0, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1])
-x_m = x_nm * 1852
+# 各测线距中心点的距离
+distances = np.array([-800, -600, -400, -200, 0, 200, 400, 600, 800])
 
+# 每个点的水深
+D = D_0 - distances * np.tan(np.radians(alpha))
 
-# β为度，转为弧度（0到360，步长45°）
-# β为度，转为弧度
-beta_deg = np.array([0, 45, 90, 135, 180, 225, 270, 315])
+# 覆盖宽度（更精确公式，考虑坡度和条带角度）
+W = D * np.sin(np.radians(theta / 2)) * (
+    1 / np.sin(np.radians((180 - theta) / 2 + alpha)) +
+    1 / np.sin(np.radians((180 - theta) / 2 - alpha))
+)
 
-beta = np.radians(beta_deg)
+# 重叠率
+n = (1 - d_proj / W) * 100
 
-# 结果矩阵
-cover_width = np.zeros((len(beta), len(x_m)))
+# 创建 DataFrame 用于保存结果
+df = pd.DataFrame({'测线距中心点处的距离/m': distances})
+df['海水深度/m'] = D
+df['覆盖宽度/m'] = W
+df['与前一条测线的重叠率/%'] = n
 
-# 计算
-for i, b in enumerate(beta):
-    for j, x in enumerate(x_m):
-        D_x = D0 + x * np.tan(alpha) * np.cos(b)
-        W_x = 2 * D_x * np.tan(theta)
-        cover_width[i, j] = W_x
-
-# 构建DataFrame
-df = pd.DataFrame(cover_width, index=beta_deg, columns=x_nm)
-df.index.name = '测线方向夹角/°'
-df.columns.name = '距离/海里'
-
-# 打印结果
-pd.set_option('display.max_rows', None)
-pd.set_option('display.max_columns', None)
-print('覆盖宽度/m:')
-print(df.round(3))
+print(df)
