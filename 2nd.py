@@ -14,37 +14,48 @@ import pandas as pd
 #   β = 测线与坡面法向夹角
 #   x = 距中心点距离
 #
-# 1. 水深计算（x方向分量）：
+# 水深计算（x方向分量）：
 #    D(x) = D0 + x * 1852 * tan(α) * cos(β)
-# 2. 覆盖宽度：
-#    W(x, β) = 2 * D(x) * tan(θ)
+
+
+
+import numpy as np
+import pandas as pd
 
 # 参数
 beam_angle_deg = 120
 slope_deg = 1.5
 D0 = 120
-theta = np.radians(beam_angle_deg / 2)
-alpha = np.radians(slope_deg)
+theta_deg = beam_angle_deg
+alpha_rad = np.radians(slope_deg)
 
 # x为海里，转为米
 x_nm = np.array([0, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1])
 x_m = x_nm * 1852
 
-
-# β为度，转为弧度（0到360，步长45°）
 # β为度，转为弧度
 beta_deg = np.array([0, 45, 90, 135, 180, 225, 270, 315])
-
-beta = np.radians(beta_deg)
+beta_rad = np.radians(beta_deg)
 
 # 结果矩阵
-cover_width = np.zeros((len(beta), len(x_m)))
+cover_width = np.zeros((len(beta_rad), len(x_m)))
 
 # 计算
-for i, b in enumerate(beta):
+for i, b in enumerate(beta_rad):
     for j, x in enumerate(x_m):
-        D_x = D0 + x * np.tan(alpha) * np.cos(b)
-        W_x = 2 * D_x * np.tan(theta)
+        # 水深公式
+        D_x = D0 - x * np.tan(alpha_rad) * np.cos(b)
+        # delta计算
+        delta = np.arcsin(
+            np.abs(np.sin(b) * np.sin(alpha_rad)) /
+            np.sqrt(np.cos(b)**2 * np.cos(alpha_rad)**2 + np.sin(b)**2)
+        )
+        delta_deg = np.degrees(delta)
+        # 覆盖宽度公式
+        sin_theta2 = np.sin(np.radians(theta_deg / 2))
+        sin1 = np.sin(np.radians((180 - theta_deg) / 2 + delta_deg))
+        sin2 = np.sin(np.radians((180 - theta_deg) / 2 - delta_deg))
+        W_x = D_x * sin_theta2 * (1 / sin1 + 1 / sin2)
         cover_width[i, j] = W_x
 
 # 构建DataFrame
@@ -52,7 +63,6 @@ df = pd.DataFrame(cover_width, index=beta_deg, columns=x_nm)
 df.index.name = '测线方向夹角/°'
 df.columns.name = '距离/海里'
 
-# 打印结果
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 print('覆盖宽度/m:')
