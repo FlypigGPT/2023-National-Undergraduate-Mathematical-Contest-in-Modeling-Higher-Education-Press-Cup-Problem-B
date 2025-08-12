@@ -15,7 +15,7 @@ import pandas as pd
 #   x = 距中心点距离
 #
 # 水深计算（x方向分量）：
-#    D(x) = D0 + x * 1852 * tan(α) * cos(β)
+#    D(x) = D0 - x * 1852 * tan(α) * cos(β)
 
 
 
