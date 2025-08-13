@@ -10,6 +10,14 @@
 """
 
 import math, numpy as np, pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.patches import Rectangle
+import matplotlib.patches as mpatches
+
+# 设置中文字体
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
+plt.rcParams['axes.unicode_minus'] = False
 
 # ------------------ 参数设置 ------------------
 nm_to_m = 1852.0
@@ -151,3 +159,90 @@ print(df.to_string(index=False))
 print("\n总测线条数:", Ns)
 print(f"覆盖范围: 从 {covered_left:.2f} m 到 {covered_right:.2f} m")
 print(f"总覆盖长度: {(covered_right-covered_left)/1000:.3f} km")
+
+# ------------------ 可视化图表 ------------------
+print("\n正在生成可视化图表...")
+
+# 1. 测线布设示意图
+print("生成图表 1/8: 测线布设示意图")
+fig1 = plt.figure(figsize=(12, 8))
+colors = plt.cm.viridis(np.linspace(0, 1, Ns))
+
+for i, (center, left, right, width) in enumerate(zip(centers, lefts, rights, W_vals)):
+    # 绘制测线覆盖区域
+    rect = Rectangle((left, i-0.3), width, 0.6, 
+                     facecolor=colors[i], alpha=0.7, edgecolor='black', linewidth=1)
+    plt.gca().add_patch(rect)
+    # 绘制测线中心
+    plt.plot(center, i, 'ro', markersize=8, markeredgecolor='black')
+
+# 绘制海域边界
+plt.axvline(west_bound, color='red', linestyle='--', linewidth=2, label='西界')
+plt.axvline(east_bound, color='red', linestyle='--', linewidth=2, label='东界')
+
+plt.xlabel('东西向距离 (m)')
+plt.ylabel('测线编号')
+plt.title('测线布设示意图', fontsize=14, fontweight='bold')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+# 2. 水深剖面图
+print("生成图表 2/8: 水深剖面图")
+fig2 = plt.figure(figsize=(12, 8))
+x_range = np.linspace(west_bound-1000, east_bound+1000, 1000)
+depths = [depth_at(x) for x in x_range]
+
+plt.plot(x_range, depths, 'b-', linewidth=3, label='海底地形')
+plt.scatter(centers, [depth_at(x) for x in centers], 
+           c=range(Ns), cmap='viridis', s=100, 
+           edgecolors='black', linewidth=1, label='测线中心')
+
+plt.xlabel('东西向距离 (m)')
+plt.ylabel('水深 (m)')
+plt.title('水深剖面与测线中心位置', fontsize=14, fontweight='bold')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.gca().invert_yaxis()  # 水深向下为正
+plt.tight_layout()
+plt.show()
+
+# 3. 条带宽度变化图
+print("生成图表 3/8: 条带宽度变化图")
+fig3 = plt.figure(figsize=(12, 8))
+plt.plot(centers, W_vals, 'o-', linewidth=2, markersize=8, 
+         color='green', markeredgecolor='black')
+plt.fill_between(centers, W_vals, alpha=0.3, color='green')
+
+plt.xlabel('测线中心位置 (m)')
+plt.ylabel('条带宽度 (m)')
+plt.title('条带宽度随位置变化', fontsize=14, fontweight='bold')
+plt.grid(True, alpha=0.3)
+
+# 添加趋势线
+z = np.polyfit(centers, W_vals, 1)
+p = np.poly1d(z)
+plt.plot(centers, p(centers), "r--", alpha=0.8, label=f'趋势线: y={z[0]:.3f}x+{z[1]:.1f}')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# 4. 覆盖率分析
+print("生成图表 4/4: 覆盖率分析")
+fig8 = plt.figure(figsize=(10, 8))
+coverage_length = covered_right - covered_left
+target_length = L_ew
+coverage_ratio = coverage_length / target_length
+
+labels = ['已覆盖', '未覆盖']
+sizes = [coverage_ratio, 1-coverage_ratio]
+colors_pie = ['lightblue', 'lightgray']
+
+plt.pie(sizes, labels=labels, colors=colors_pie, autopct='%1.1f%%', startangle=90)
+plt.title(f'海域覆盖率分析\n(目标: {target_length/1000:.1f}km, 实际: {coverage_length/1000:.1f}km)', 
+          fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.show()
+
+print("所有图表生成完成！")
