@@ -1,60 +1,153 @@
-import numpy as np
-import math
+# -*- coding: utf-8 -*-
+"""
+基于坡度、左右非对称条带范围、以及重叠率 η 的多波束测线迭代布设算法
+思路：
+1. 从西侧边界开始，放置第一条测线，使其左边缘正好在海域西界。
+2. 根据上一条测线的右边缘位置 + 设定重叠率，迭代计算下一条测线中心位置。
+3. 直到覆盖到东界为止。
 
-# 问题3：最短测量长度的测线设计，满足重叠率10%~20%
-# --------------------------------------------------
-# 海域：南北长2海里，东西宽4海里，中心水深110m，西深东浅，坡度1.5°，开角120°
-# 目标：测线数量最少，总长度最短，重叠率10%~20%，完全覆盖
 
-# 参数
-beam_angle_deg = 120
-slope_deg = 1.5
-D0 = 110
-theta = np.radians(beam_angle_deg / 2)
-alpha = np.radians(slope_deg)
+"""
 
-width_nm = 4  # 东西宽4海里
-length_nm = 2 # 南北长2海里
-width_m = width_nm * 1852
-length_m = length_nm * 1852
+import math, numpy as np, pandas as pd
 
-# 东西向坐标，x=0为中心，x∈[-2, 2]海里
-x_edges_nm = np.array([-2, 2])
-x_edges_m = x_edges_nm * 1852
+# ------------------ 参数设置 ------------------
+nm_to_m = 1852.0
+L_ew = 4.0 * nm_to_m    # 东西向长度（米）
+B_ns = 2.0 * nm_to_m    # 南北向长度（米）（此处没用到）
+D0 = 110.0              # 海域中心（x=0）水深（米）
+alpha_deg = 1.5         # 坡度（度）（东西向）
+alpha_rad = math.radians(alpha_deg)
+k = math.tan(alpha_rad) # 坡度斜率：水深 = D0 - k * x （x 向东为正，越东越浅）
 
-# 计算两端水深（西深东浅，符号为减）
-D_west = D0 - x_edges_m[0] * np.tan(alpha)
-D_east = D0 - x_edges_m[1] * np.tan(alpha)
+theta_half_deg = 60.0   # 多波束半开角（度）
+theta_half = math.radians(theta_half_deg)
 
-# 计算两端覆盖宽度
-W_west = 2 * D_west * np.tan(theta)
-W_east = 2 * D_east * np.tan(theta)
-W_min = min(W_west, W_east)
+eta = 0.15              # 目标重叠率（比例）
 
-# 满足重叠率10%~20%的测线间距范围
-S_max = 0.90 * W_min  # 重叠率10%
-S_min = 0.80 * W_min  # 重叠率20%
+# ------------------ 条带几何函数 ------------------
+def left_extent(D):
+    """
+    输入：中心水深 D（米）
+    输出：测线中心到左边缘的水平距离（米）（负值）
+    """
+    t = math.tan(theta_half)
+    return - D * t / (1 + k * t)
 
-# 取S_max保证测线数量最少且全覆盖
-S = S_max
-num_lines = math.ceil(width_m / S) + 1
-actual_spacing = width_m / (num_lines - 1)
+def right_extent(D):
+    """
+    输入：中心水深 D（米）
+    输出：测线中心到右边缘的水平距离（米）（正值）
+    """
+    t = math.tan(theta_half)
+    return D * t / (1 - k * t)
 
-# 实际重叠率（用最小覆盖宽度计算，保证最差情况）
-actual_overlap = (1 - actual_spacing / W_min) * 100
+def swath_width(D):
+    """条带总宽度 = 右边距 - 左边距"""
+    return right_extent(D) - left_extent(D)
 
-# 总测量长度
-total_length = num_lines * length_m
+def depth_at(x):
+    """某位置 x（米，中心为0）处的水深"""
+    return D0 - k * x
 
-print(f"东西两端水深: 西 {D_west:.2f} m, 东 {D_east:.2f} m")
-print(f"东西两端覆盖宽度: 西 {W_west:.2f} m, 东 {W_east:.2f} m")
-print(f"最小覆盖宽度: {W_min:.2f} m")
-print(f"测线间距范围: {S_min:.2f} m ~ {S_max:.2f} m")
-print(f"最优测线间距: {actual_spacing:.2f} m")
-print(f"测线数量: {num_lines}")
-print(f"实际重叠率: {actual_overlap:.2f}%")
-print(f"总测量长度: {total_length/1000:.2f} km")
-D_west = D0 - x_edges_m[0] * np.tan(alpha)
-D_east = D0 - x_edges_m[1] * np.tan(alpha)
-D_west = D0 - x_edges_m[0] * np.tan(alpha)
-D_east = D0 - x_edges_m[1] * np.tan(alpha)
+# ------------------ 求第一条测线位置 ------------------
+west_bound = -L_ew/2.0   # 西界
+east_bound = L_ew/2.0    # 东界
+
+def find_center_left_cover(target_bound):
+    """
+    找到第一条测线中心位置，使得它的左边缘刚好等于海域西界。
+    用二分法求解。
+    """
+    a = west_bound
+    b = east_bound
+    for _ in range(60):
+        m = 0.5*(a+b)
+        val = m + left_extent(depth_at(m)) - target_bound
+        if abs(val) < 1e-12:
+            return m
+        if (a + left_extent(depth_at(a)) - target_bound) * val <= 0:
+            b = m
+        else:
+            a = m
+    return 0.5*(a+b)
+
+x0 = find_center_left_cover(west_bound)
+
+# ------------------ 迭代布设测线 ------------------
+centers = [x0]
+max_iters = 500
+
+for it in range(max_iters):
+    xi = centers[-1]                    # 当前测线中心
+    Di = depth_at(xi)                    # 当前测线中心水深
+    prev_right = xi + right_extent(Di)   # 当前测线右边界位置
+
+    # 如果已经覆盖到东界，停止
+    if prev_right >= east_bound - 1e-6:
+        break
+
+    # 定义 f(x)：上一条测线右边缘 到 下一条测线左边缘 的距离 - 重叠控制量
+    def f(x):
+        D = depth_at(x)
+        return prev_right - (x + left_extent(D)) - eta * swath_width(D)
+
+    # 在区间 (xi, east_bound) 内找 f(x) = 0 的点
+    a = xi + 1e-6
+    b = east_bound
+    fa = f(a)
+    fb = f(b)
+
+    if fa < 0:
+        # 如果一开始就负，说明无法再放下一条
+        break
+
+    # 检查是否有符号变化，没有的话就用近似公式
+    if fa * fb > 0:
+        approx = xi + (1-eta) * swath_width(depth_at(xi))
+        centers.append(approx)
+        continue
+
+    # 二分法求解
+    for _ in range(60):
+        m = 0.5*(a+b)
+        fm = f(m)
+        if fm == 0 or (b-a) < 1e-6:
+            a = b = m
+            break
+        if fa * fm <= 0:
+            b = m
+            fb = fm
+        else:
+            a = m
+            fa = fm
+
+    x_next = 0.5*(a+b)
+    centers.append(x_next)
+
+# ------------------ 结果计算 ------------------
+centers = np.array(centers)
+Ns = len(centers)
+
+lefts = centers + np.array([left_extent(depth_at(x)) for x in centers])
+rights = centers + np.array([right_extent(depth_at(x)) for x in centers])
+W_vals = np.array([swath_width(depth_at(x)) for x in centers])
+
+covered_left = lefts.min()
+covered_right = rights.max()
+
+# 生成结果表
+df = pd.DataFrame({
+    '测线中心x坐标_米': centers,
+    '中心水深_米': [round(depth_at(x),3) for x in centers],
+    '左边界x坐标_米': lefts,
+    '右边界x坐标_米': rights,
+    '条带宽度_米': W_vals
+})
+
+# 输出结果
+print("===== 测线布设结果 =====")
+print(df.to_string(index=False))
+print("\n总测线条数:", Ns)
+print(f"覆盖范围: 从 {covered_left:.2f} m 到 {covered_right:.2f} m")
+print(f"总覆盖长度: {(covered_right-covered_left)/1000:.3f} km")
